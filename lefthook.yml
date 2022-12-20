@@ -1,0 +1,8 @@
+pre-commit:
+  commands:
+    linter:
+      run: (pylint {staged_files} | tee .pylint.log) && python3 .pcs.py {staged_files}
+post-merge:
+    commands:
+        requirements:
+            run: pip install -r requirements/dev.txt
