@@ -1,14 +1,22 @@
+import os.path
+
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError
 
-from .exceptions import LoginException
+from proof_of_transport.exceptions import LoginException
 
 
-def proof_of_transport(login, password):
+def download_last_proof_of_transport(login, password) -> str:
+    """Downloads a last proof of transport and returns its absolute filepath"""
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=True)
         page = browser.new_page()
-        page.on("dialog", lambda dialog: dialog.dismiss())
         page.goto('https://www.cts-strasbourg.eu/fr/connexion/')
+        try:
+            # Close possible dialogs
+            page.get_by_role("button", name="Ok",).click()
+        except TimeoutError:
+            pass
         page.get_by_label("Adresse email").fill(login)
         page.get_by_label("Mot de passe").fill(password)
         page.locator("#login-form-submit").get_by_role("link",
@@ -25,5 +33,6 @@ def proof_of_transport(login, password):
             page.locator(
                 '//*[@id="table_result"]/tbody/tr[1]/td[6]/button').click()
         download = download_info.value
-        filepath = "./proof.pdf"
+        filepath = "/tmp/" + download.suggested_filename
         download.save_as(filepath)
+        return os.path.abspath(filepath)
