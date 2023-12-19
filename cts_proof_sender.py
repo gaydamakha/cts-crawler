@@ -6,16 +6,16 @@ from tkinter.ttk import *
 from tkinter import messagebox
 from proof_of_transport.crawlers import download_last_proof_of_transport
 from proof_of_transport.exceptions import LoginException
-from proof_of_transport.slack import SlackClient
+from proof_of_transport.mail import MailClient
 
 con = sqlite3.connect('userdata.db')
 send_errors_queue = queue.Queue()
 
 
-def handle_send_thread(login, password, slack_client: SlackClient, slack_user_id):
+def handle_send_thread(login: str, password: str, mail_client: MailClient, to_email: str):
     try:
         filepath = download_last_proof_of_transport(login, password)
-        slack_client.send_file_to(filepath, slack_user_id)
+        mail_client.send_file_to(filepath, to_email)
     except Exception as e:
         send_errors_queue.put(e)
         return
@@ -30,14 +30,14 @@ class App(Tk):
                                 id INTEGER PRIMARY KEY,
                                 login TEXT,
                                 password TEXT,
-                                token TEXT,
-                                receiver_slack_user_id TEXT
+                                from_email TEXT,
+                                to_email TEXT
                             )
                         ''')
         con.commit()
         self.resizable(False, False)
         self.title('CTS-proof-sender')
-        self.slack_client = None
+        self.mail_client = None
         # get screen width and height
         ws = self.winfo_screenwidth()  # width of the screen
         hs = self.winfo_screenheight()  # height of the screen
@@ -55,25 +55,25 @@ class App(Tk):
         entry_width = 17
 
         self.entries = {}
-        # Slack token
+        # Send email from
         row = Frame(self)
-        lab = Label(row, width=entry_width, text="Slack token: ", anchor='w')
+        lab = Label(row, width=entry_width, text="Send from: ", anchor='w')
         ent = Entry(row)
         row.grid(row=0, column=0, padx=10, pady=5)
         # row.pack(side=TOP, fill=X, padx=5, pady=5)
         lab.pack(side=LEFT)
         ent.pack(side=RIGHT, expand=YES, fill=X)
-        self.entries["SlackToken"] = ent
+        self.entries["SendFrom"] = ent
 
-        # Slack token
+        # Send email to
         row = Frame(self)
-        lab = Label(row, width=entry_width, text="Receiver's slack user id: ", anchor='w')
+        lab = Label(row, width=entry_width, text="Send to: ", anchor='w')
         ent = Entry(row)
         row.grid(row=1, column=0, padx=10, pady=5)
         # row.pack(side=TOP, fill=X, padx=5, pady=5)
         lab.pack(side=LEFT)
         ent.pack(side=RIGHT, expand=YES, fill=X)
-        self.entries['ProofReceiverSlackUserId'] = ent
+        self.entries['SendTo'] = ent
 
         # Login
         row = Frame(self)
@@ -101,9 +101,9 @@ class App(Tk):
         if app_settings is not None:
             self.entries['Login'].insert(END, app_settings[1])
             self.entries['Password'].insert(END, app_settings[2])
-            self.entries['SlackToken'].insert(END, app_settings[3])
-            self.slack_client = SlackClient(app_settings[3])
-            self.entries['ProofReceiverSlackUserId'].insert(END, app_settings[4])
+            self.entries['SendFrom'].insert(END, app_settings[3])
+            self.mail_client = MailClient(app_settings[3])
+            self.entries['SendTo'].insert(END, app_settings[4])
 
         # Progress frame
         self.progress_frame = Frame(self)
@@ -137,27 +137,27 @@ class App(Tk):
         self.pb.grid_remove()
 
     def handle_send(self):
-        slack_token = self.entries['SlackToken'].get()
-        if self.slack_client is None or self.slack_client.token != slack_token:
-            self.slack_client = SlackClient(slack_token)
+        from_email = self.entries['SendFrom'].get()
+        if self.mail_client is None or self.mail_client.from_email != from_email:
+            self.mail_client = MailClient(from_email)
         login = self.entries['Login'].get()
         password = self.entries['Password'].get()
-        receiver_slack_user_id = self.entries['ProofReceiverSlackUserId'].get()
+        to_email = self.entries['SendTo'].get()
         cur = con.cursor()
-        cur.execute("INSERT INTO app_settings VALUES (:id, :login, :password, :token, :receiver_slack_user_id) ON "
+        cur.execute("INSERT INTO app_settings VALUES (:id, :login, :password, :from_email, :to_email) ON "
                     "CONFLICT(id) DO UPDATE SET "
-                    "login=excluded.login, password=excluded.password, token=excluded.token, "
-                    "receiver_slack_user_id=excluded.receiver_slack_user_id", {
+                    "login=excluded.login, password=excluded.password, from_email=excluded.from_email, "
+                    "to_email=excluded.to_email", {
                         'id': 1,
                         'login': login,
                         'password': password,
-                        'token': slack_token,
-                        'receiver_slack_user_id': receiver_slack_user_id,
+                        'from_email': from_email,
+                        'to_email': to_email,
                     })
 
         con.commit()
         self.start_sending()
-        args = [login, password, self.slack_client, receiver_slack_user_id]
+        args = [login, password, self.mail_client, to_email]
         threading.Thread(target=handle_send_thread, args=args).start()
 
     def after_send(self):
